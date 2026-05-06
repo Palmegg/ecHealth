@@ -38,7 +38,7 @@ $script:Config = [ordered]@{
 
 #region Static Variables
 $script:AppName = 'ecHealth'
-$script:AppVersion = '1.1.3'
+$script:AppVersion = '1.2.0'
 $script:RootPath = 'C:\ProgramData\EndpointHealthAnalyzer'
 $script:ReportsPath = Join-Path $script:RootPath 'Reports'
 $script:LogsPath = Join-Path $script:RootPath 'Logs'
@@ -219,7 +219,7 @@ Failed sections: $(@($Report.Metadata.FailedSections).Count)
         $script:Controls.WindowsUpdateText.Text = ConvertTo-DisplayJson $Report.WindowsUpdate
         $script:Controls.IntuneText.Text = ConvertTo-DisplayJson $Report.Intune
         $script:Controls.DriversFirmwareText.Text = ConvertTo-DisplayJson $Report.DriversFirmware
-        $script:Controls.EventLogsText.Text = ConvertTo-DisplayJson $Report.EventLogs
+        $script:Controls.EventLogsText.Text = "Root cause analysis:`r`n" + (ConvertTo-DisplayJson $Report.RootCauseAnalysis) + "`r`n`r`nEvent logs:`r`n" + (ConvertTo-DisplayJson $Report.EventLogs)
         $script:Controls.DiskHardwareText.Text = ConvertTo-DisplayJson $Report.DiskHardware
         $script:Controls.ComparisonText.Text = ConvertTo-DisplayJson $Report.Comparison
         foreach ($name in @('ExportReportButton','OpenReportButton','ExportReportButton2','OpenReportButton2','ExportBaselineButton','CompareBaselineButton')) {
@@ -458,6 +458,7 @@ function Get-RecentEvents {
             Level     = $Levels
         } -MaxEvents $MaxEvents -ErrorAction Stop | ForEach-Object {
             [pscustomobject]@{
+                LogName      = $LogName
                 TimeCreated  = $_.TimeCreated
                 Id           = $_.Id
                 LevelDisplay = $_.LevelDisplayName
@@ -626,6 +627,9 @@ function Get-EventLogAnalysis {
             NTFSErrors                  = @($allEvents | Where-Object { $_.ProviderName -match 'Ntfs' })
             WHEAErrors                  = @($allEvents | Where-Object { $_.ProviderName -match 'WHEA' })
             DisplayDriverCrashes        = @($allEvents | Where-Object { $_.ProviderName -match 'Display' -or $_.Message -match 'display driver|nvlddmkm|amdwddmg|igfx' })
+            ThermalPowerEvents          = @($allEvents | Where-Object { $_.ProviderName -match 'Thermal|Power|Kernel-Processor-Power|Kernel-Power' -or $_.Message -match 'thermal|temperature|overheat|battery|AC adapter|power supply' })
+            PlannedShutdownEvents       = @($allEvents | Where-Object { ($_.Id -in @(1074,1076)) -or ($_.ProviderName -match 'USER32' -and $_.Message -match 'restart|shutdown') })
+            EventLogUnexpectedShutdowns = @($allEvents | Where-Object { $_.Id -eq 6008 -and $_.ProviderName -match 'EventLog' })
             ApplicationCrashes          = @($allEvents | Where-Object { $_.ProviderName -match 'Application Error|Windows Error Reporting' })
             MSIInstallerFailures        = @($allEvents | Where-Object { $_.ProviderName -match 'MsiInstaller' -and $_.LevelDisplay -in @('Error','Warning') })
             WindowsUpdateFailures       = @($allEvents | Where-Object { $_.ProviderName -match 'WindowsUpdateClient' -and $_.LevelDisplay -in @('Error','Critical') })
@@ -680,6 +684,146 @@ function New-Finding {
     }
 }
 
+function ConvertTo-ShortEvidenceText {
+    param($Event, [int]$MaxMessageLength = 260)
+    if (-not $Event) { return '' }
+    $message = [string]$Event.Message
+    if ($message.Length -gt $MaxMessageLength) {
+        $message = $message.Substring(0, $MaxMessageLength) + '...'
+    }
+    '{0} | {1} | ID {2} | {3} | {4}' -f $Event.TimeCreated, $Event.LogName, $Event.Id, $Event.ProviderName, $message
+}
+
+function ConvertTo-RootCauseEvidence {
+    param($Event, [datetime]$ReferenceTime)
+    if (-not $Event) { return $null }
+    $delta = [math]::Round((New-TimeSpan -Start $ReferenceTime -End ([datetime]$Event.TimeCreated)).TotalMinutes, 1)
+    [pscustomobject]@{
+        TimeCreated  = $Event.TimeCreated
+        DeltaMinutes = $delta
+        LogName      = $Event.LogName
+        EventId      = $Event.Id
+        Level        = $Event.LevelDisplay
+        Provider     = $Event.ProviderName
+        Message      = if ([string]$Event.Message -and ([string]$Event.Message).Length -gt 500) { ([string]$Event.Message).Substring(0, 500) + '...' } else { $Event.Message }
+    }
+}
+
+function Get-AllCollectedEvents {
+    param([pscustomobject]$EventLogs)
+    @($EventLogs.Channels | ForEach-Object { $_.Events }) | Where-Object { $_ -and $_.TimeCreated } | Sort-Object TimeCreated
+}
+
+function Get-EventsNearTime {
+    param(
+        $Events,
+        [datetime]$ReferenceTime,
+        [int]$MinutesBefore = 30,
+        [int]$MinutesAfter = 10
+    )
+    $start = $ReferenceTime.AddMinutes(-1 * $MinutesBefore)
+    $end = $ReferenceTime.AddMinutes($MinutesAfter)
+    @($Events | Where-Object { ([datetime]$_.TimeCreated) -ge $start -and ([datetime]$_.TimeCreated) -le $end } | Sort-Object TimeCreated)
+}
+
+function New-RootCauseResult {
+    param(
+        [datetime]$TimeCreated,
+        [string]$IssueType,
+        [string]$LikelyCause,
+        [ValidateSet('High','Medium','Low','Unknown')][string]$Confidence,
+        [string]$Reasoning,
+        $Evidence,
+        [string[]]$RecommendedActions
+    )
+    [pscustomobject]@{
+        IssueType          = $IssueType
+        TimeCreated        = $TimeCreated
+        LikelyCause        = $LikelyCause
+        Confidence         = $Confidence
+        Reasoning          = $Reasoning
+        Evidence           = @($Evidence)
+        RecommendedActions = @($RecommendedActions)
+    }
+}
+
+function Get-UnexpectedShutdownRootCause {
+    param(
+        $ShutdownEvent,
+        $AllEvents
+    )
+    $shutdownTime = [datetime]$ShutdownEvent.TimeCreated
+    $nearby = Get-EventsNearTime -Events $AllEvents -ReferenceTime $shutdownTime -MinutesBefore 45 -MinutesAfter 15
+    $before = @($nearby | Where-Object { ([datetime]$_.TimeCreated) -le $shutdownTime })
+    $after = @($nearby | Where-Object { ([datetime]$_.TimeCreated) -gt $shutdownTime })
+
+    $bugCheck = @($nearby | Where-Object { ($_.Id -eq 1001 -and $_.ProviderName -match 'BugCheck') -or $_.Message -match 'bugcheck|blue screen|memory dump|minidump' } | Sort-Object TimeCreated | Select-Object -First 3)
+    $whea = @($before | Where-Object { $_.ProviderName -match 'WHEA' } | Sort-Object TimeCreated -Descending | Select-Object -First 4)
+    $disk = @($before | Where-Object { $_.ProviderName -match 'disk|storahci|stornvme|iaStor|Ntfs' -or $_.Message -match '\bdisk\b|storage|bad block|controller error|reset to device' } | Sort-Object TimeCreated -Descending | Select-Object -First 4)
+    $display = @($before | Where-Object { $_.ProviderName -match 'Display' -or $_.Message -match 'display driver|nvlddmkm|amdwddmg|igfx|graphics' } | Sort-Object TimeCreated -Descending | Select-Object -First 4)
+    $thermal = @($before | Where-Object { $_.ProviderName -match 'Thermal|Kernel-Processor-Power' -or $_.Message -match 'thermal|temperature|overheat|processor speed|firmware' } | Sort-Object TimeCreated -Descending | Select-Object -First 4)
+    $planned = @($nearby | Where-Object { ($_.Id -in @(1074,1076)) -or ($_.ProviderName -match 'USER32' -and $_.Message -match 'restart|shutdown') } | Sort-Object TimeCreated -Descending | Select-Object -First 3)
+    $update = @($nearby | Where-Object { $_.ProviderName -match 'WindowsUpdateClient|Servicing|CBS|Update' -or $_.Message -match 'update|servicing|reboot required|restart required' } | Sort-Object TimeCreated -Descending | Select-Object -First 4)
+    $serviceDriver = @($before | Where-Object { $_.ProviderName -match 'Service Control Manager' -or $_.Message -match 'driver|service.*terminated|service.*failed|stopped unexpectedly' } | Sort-Object TimeCreated -Descending | Select-Object -First 4)
+    $eventLog6008 = @($nearby | Where-Object { $_.Id -eq 6008 -and $_.ProviderName -match 'EventLog' } | Sort-Object TimeCreated -Descending | Select-Object -First 2)
+
+    $evidenceEvents = New-Object System.Collections.ArrayList
+    [void]$evidenceEvents.Add($ShutdownEvent)
+
+    if ($bugCheck.Count -gt 0) {
+        foreach ($event in $bugCheck) { [void]$evidenceEvents.Add($event) }
+        return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'BugCheck / blue screen' -Confidence 'High' -Reasoning 'A BugCheck or crash dump event was found close to the unexpected shutdown. Kernel-Power 41 is likely the restart symptom, while the BugCheck is the stronger root-cause signal.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Review C:\Windows\MEMORY.DMP and C:\Windows\Minidump if present.', 'Update BIOS, chipset, storage, display, and network drivers.', 'Check the BugCheck code in Event ID 1001 and match it to the failing driver or subsystem.')
+    }
+    if ($whea.Count -gt 0) {
+        foreach ($event in $whea) { [void]$evidenceEvents.Add($event) }
+        return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'Hardware or firmware fault reported by WHEA' -Confidence 'High' -Reasoning 'WHEA hardware error events occurred shortly before the shutdown. These often point to CPU, memory, PCIe, storage, firmware, or power stability problems.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Run OEM hardware diagnostics.', 'Update BIOS/UEFI and chipset/storage drivers.', 'Inspect WHEA event details for component type, APIC ID, PCIe device, or cache hierarchy clues.')
+    }
+    if ($disk.Count -gt 0) {
+        foreach ($event in $disk) { [void]$evidenceEvents.Add($event) }
+        return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'Disk, file system, or storage controller instability' -Confidence 'Medium' -Reasoning 'Disk, NTFS, or storage controller errors were logged before the shutdown. Storage timeouts or controller resets can freeze a PC and lead to hard resets.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Check SMART/storage reliability and OEM disk diagnostics.', 'Update storage controller, NVMe, chipset, and BIOS firmware.', 'Run chkdsk or file-system validation if NTFS errors are present.')
+    }
+    if ($thermal.Count -gt 0) {
+        foreach ($event in $thermal) { [void]$evidenceEvents.Add($event) }
+        return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'Thermal, processor power, or firmware instability' -Confidence 'Medium' -Reasoning 'Thermal, processor power, or firmware-related events appeared before the shutdown. Thermal protection or firmware power handling can cause abrupt shutdowns.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Check cooling, fan operation, dock/power adapter, and BIOS thermal settings.', 'Update BIOS/UEFI and power management drivers.', 'Review OEM thermal diagnostics and battery/power adapter health.')
+    }
+    if ($display.Count -gt 0) {
+        foreach ($event in $display) { [void]$evidenceEvents.Add($event) }
+        return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'Display or graphics driver instability' -Confidence 'Medium' -Reasoning 'Display or graphics driver failures were logged before the shutdown. GPU driver hangs can freeze the machine and force a hard reset.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Update or roll back the display driver using OEM-approved packages.', 'Update BIOS/chipset drivers and test without external docks or monitors.', 'Check for recurring nvlddmkm, amdwddmg, igfx, or display reset events.')
+    }
+    if ($planned.Count -gt 0 -or $update.Count -gt 0) {
+        foreach ($event in @(($planned + $update) | Select-Object -First 6)) { [void]$evidenceEvents.Add($event) }
+        return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'Reboot/update transition with abnormal shutdown symptom' -Confidence 'Low' -Reasoning 'Planned reboot or update activity was found near the event, but Kernel-Power 41 still means Windows did not see a clean shutdown. This may be a failed restart, forced power-off during updates, or a secondary symptom.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Review Windows Update and Setup events around the same time.', 'Confirm whether the user forced power-off during update/restart.', 'Check pending reboot state and update installation failures.')
+    }
+    if ($serviceDriver.Count -gt 0) {
+        foreach ($event in $serviceDriver) { [void]$evidenceEvents.Add($event) }
+        return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'Driver or service instability before shutdown' -Confidence 'Low' -Reasoning 'Service Control Manager or driver/service failure events were found before the unexpected shutdown. These can be contributing signals, but are weaker than BugCheck, WHEA, or storage evidence.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Review the failing service or driver names in the timeline.', 'Update or remove the related software/driver if the pattern repeats.', 'Correlate with application crash and Windows Error Reporting events.')
+    }
+
+    foreach ($event in $eventLog6008) { [void]$evidenceEvents.Add($event) }
+    foreach ($event in @($after | Where-Object { $_.Id -in @(12,6005) -or $_.ProviderName -match 'Kernel-General|EventLog' } | Select-Object -First 3)) { [void]$evidenceEvents.Add($event) }
+    return New-RootCauseResult -TimeCreated $shutdownTime -IssueType 'Unexpected shutdown' -LikelyCause 'Power loss, forced power-off, or insufficient evidence' -Confidence 'Medium' -Reasoning 'Kernel-Power 41 was found without a nearby BugCheck, WHEA, disk, display, thermal, or strong driver failure signal. That pattern commonly means power loss, long-press power-off, battery/dock/power adapter interruption, or a freeze where Windows could not log the root cause.' -Evidence (@($evidenceEvents | ForEach-Object { ConvertTo-RootCauseEvidence $_ $shutdownTime })) -RecommendedActions @('Ask whether the user long-pressed power or lost AC/battery/dock power at the time.', 'Check power adapter, battery, dock, UPS, and physical power connections.', 'If freezes preceded the shutdown, focus on firmware, storage, display, and WHEA evidence even if no single event proves it.')
+}
+
+function Get-RootCauseAnalysis {
+    param([pscustomobject]$Report)
+    Invoke-SafeSection -Name 'Root cause analysis' -DefaultValue ([pscustomobject]@{ UnexpectedShutdowns = @(); Summary = 'Root cause analysis failed.' }) -ScriptBlock {
+        $allEvents = Get-AllCollectedEvents -EventLogs $Report.EventLogs
+        $shutdownAnalyses = @($Report.EventLogs.UnexpectedShutdowns | Sort-Object TimeCreated -Descending | Select-Object -First 10 | ForEach-Object {
+            Get-UnexpectedShutdownRootCause -ShutdownEvent $_ -AllEvents $allEvents
+        })
+        $likelyCounts = @($shutdownAnalyses | Group-Object LikelyCause | Sort-Object Count -Descending | ForEach-Object {
+            [pscustomobject]@{ LikelyCause = $_.Name; Count = $_.Count }
+        })
+        [pscustomobject]@{
+            GeneratedAt          = Get-Date
+            Method               = 'Correlates Kernel-Power 41 unexpected shutdowns with events in a -45/+15 minute window.'
+            UnexpectedShutdowns  = $shutdownAnalyses
+            LikelyCauseSummary   = $likelyCounts
+            Summary              = if ($shutdownAnalyses.Count -gt 0) { "Analyzed $($shutdownAnalyses.Count) unexpected shutdown event(s)." } else { 'No unexpected shutdown events were available for root cause analysis.' }
+        }
+    }
+}
+
 function Invoke-EndpointAnalysis {
     param([pscustomobject]$Report)
 
@@ -708,7 +852,9 @@ function Invoke-EndpointAnalysis {
         [void]$critical.Add((New-Finding 'Stability' 'Critical' 'BugCheck events detected' 'The device recorded crash events during the event lookback window.' "$(@($Report.EventLogs.BugCheckEvents).Count) BugCheck events" 'Review memory dump files, driver versions, firmware, and hardware reliability.'))
     }
     if (@($Report.EventLogs.UnexpectedShutdowns).Count -gt 0) {
-        [void]$critical.Add((New-Finding 'Stability' 'Critical' 'Unexpected shutdowns detected' 'Kernel-Power unexpected shutdown events were found.' "$(@($Report.EventLogs.UnexpectedShutdowns).Count) unexpected shutdown events" 'Check power, thermal, firmware, battery, driver, and crash dump evidence.'))
+        $topCause = @($Report.RootCauseAnalysis.UnexpectedShutdowns | Select-Object -First 1)
+        $causeText = if ($topCause.Count -gt 0) { "$($topCause[0].LikelyCause) ($($topCause[0].Confidence) confidence)" } else { 'Root-cause analysis did not find a likely cause.' }
+        [void]$critical.Add((New-Finding 'Stability' 'Critical' 'Unexpected shutdowns detected' 'Kernel-Power unexpected shutdown events were found.' "$(@($Report.EventLogs.UnexpectedShutdowns).Count) unexpected shutdown events. Leading likely cause: $causeText" 'Open the Root Cause Analysis section and review the correlated evidence timeline before replacing hardware or reinstalling Windows.'))
     }
     if (@($Report.EventLogs.WHEAErrors).Count -gt 0) {
         [void]$critical.Add((New-Finding 'Hardware' 'Critical' 'WHEA hardware errors detected' 'Windows Hardware Error Architecture events indicate possible hardware or firmware instability.' "$(@($Report.EventLogs.WHEAErrors).Count) WHEA events" 'Update firmware and drivers, run OEM diagnostics, and inspect CPU, memory, PCIe, and storage health.'))
@@ -864,6 +1010,41 @@ function Convert-EventsToHtml {
     $html -join "`n"
 }
 
+function Convert-RootCauseToHtml {
+    param($RootCauseAnalysis)
+    if (-not $RootCauseAnalysis) { return '<p class="small">Root cause analysis was not generated.</p>' }
+    $items = @($RootCauseAnalysis.UnexpectedShutdowns)
+    if ($items.Count -eq 0) {
+        return '<div class="card"><p>' + (ConvertTo-HtmlEncoded $RootCauseAnalysis.Summary) + '</p></div>'
+    }
+
+    $html = New-Object System.Collections.ArrayList
+    [void]$html.Add('<div class="card"><div class="label">Method</div><p>' + (ConvertTo-HtmlEncoded $RootCauseAnalysis.Method) + '</p></div>')
+    if ($RootCauseAnalysis.LikelyCauseSummary) {
+        [void]$html.Add('<details open><summary>Likely cause summary</summary>' + (ConvertTo-HtmlTable $RootCauseAnalysis.LikelyCauseSummary) + '</details>')
+    }
+
+    foreach ($item in $items) {
+        $badgeClass = switch ($item.Confidence) {
+            'High' { 'healthy' }
+            'Medium' { 'attention' }
+            'Low' { 'problem' }
+            default { 'critical' }
+        }
+        [void]$html.Add('<article class="finding criticalFinding">')
+        [void]$html.Add('<h3>' + (ConvertTo-HtmlEncoded $item.IssueType) + ' - ' + (ConvertTo-HtmlEncoded $item.LikelyCause) + '</h3>')
+        [void]$html.Add('<p><span class="badge ' + $badgeClass + '">Confidence: ' + (ConvertTo-HtmlEncoded $item.Confidence) + '</span> <span class="small">' + (ConvertTo-HtmlEncoded $item.TimeCreated) + '</span></p>')
+        [void]$html.Add('<p>' + (ConvertTo-HtmlEncoded $item.Reasoning) + '</p>')
+        [void]$html.Add('<details open><summary>Correlated evidence timeline</summary>' + (ConvertTo-HtmlTable $item.Evidence) + '</details>')
+        [void]$html.Add('<details><summary>Recommended actions</summary><ul>')
+        foreach ($action in @($item.RecommendedActions)) {
+            [void]$html.Add('<li>' + (ConvertTo-HtmlEncoded $action) + '</li>')
+        }
+        [void]$html.Add('</ul></details></article>')
+    }
+    $html -join "`n"
+}
+
 function Get-CategoryClass {
     param([string]$Category)
     switch ($Category) {
@@ -922,6 +1103,7 @@ function New-HtmlReport {
             '__EXECUTIVE_SUMMARY__'  = $summary
             '__CRITICAL_FINDINGS__'  = Convert-FindingsToHtml $Report.CriticalFindings $true
             '__WARNINGS__'           = Convert-FindingsToHtml $Report.Warnings $false
+            '__ROOT_CAUSE__'         = Convert-RootCauseToHtml $Report.RootCauseAnalysis
             '__DEVICE_TABLE__'       = ConvertTo-HtmlTable $Report.Device
             '__HARDWARE_TABLE__'     = ConvertTo-HtmlTable $Report.Hardware
             '__WINDOWS_UPDATE__'     = $windowsUpdateHtml
@@ -1097,6 +1279,7 @@ function New-EndpointReport {
         DriversFirmware = $drivers
         EventLogs       = $events
         DiskHardware    = $diskHardware
+        RootCauseAnalysis = $null
         HealthScore     = $null
         CriticalFindings = @()
         Warnings        = @()
@@ -1106,6 +1289,8 @@ function New-EndpointReport {
         }
     }
 
+    Set-GuiStatus 'Correlating root-cause evidence...' 88
+    $report.RootCauseAnalysis = Get-RootCauseAnalysis -Report $report
     Set-GuiStatus 'Analyzing findings and calculating health score...' 92
     $report = Invoke-EndpointAnalysis -Report $report
     $report.HealthScore = Get-HealthScore -Report $report

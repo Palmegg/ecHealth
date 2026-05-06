@@ -135,6 +135,20 @@ C:\ProgramData\EndpointHealthAnalyzer\Logs\Launchpad.log
 - Recent System, Application, Setup, Windows Update, Intune, and Autopilot event logs
 - Disk, NTFS, WHEA, BugCheck, unexpected shutdown, application crash, MSI, and service errors
 
+## Root Cause Analysis
+
+ecHealth includes a first-pass root cause analysis layer for unexpected shutdowns. It correlates Kernel-Power 41 events with nearby BugCheck, WHEA, disk/storage, NTFS, display driver, thermal/power, Windows Update, planned restart, service, and driver events.
+
+The output uses:
+
+- Likely cause
+- Confidence
+- Reasoning
+- Correlated evidence timeline
+- Recommended actions
+
+This is evidence-based triage, not a guarantee. Some Kernel-Power 41 events only prove that Windows did not shut down cleanly. When no stronger signal exists, ecHealth reports likely power loss, forced power-off, freeze, or insufficient evidence.
+
 ## Known Limitations
 
 - Some Windows Update history sources vary by OS build and policy configuration.
