@@ -1,0 +1,209 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Endpoint Health Analyzer"
+        Height="860"
+        Width="1240"
+        MinHeight="720"
+        MinWidth="1040"
+        WindowStartupLocation="CenterScreen"
+        Background="#F5F7FB"
+        FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,9"/>
+            <Setter Property="Margin" Value="0,0,10,10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="#2563EB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#2563EB"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#FFFFFF"/>
+            <Setter Property="Foreground" Value="#1F2937"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+        </Style>
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="#F5F7FB"/>
+            <Setter Property="BorderBrush" Value="#E5E7EB"/>
+        </Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Padding" Value="16,9"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#334155"/>
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="18"/>
+            <Setter Property="Margin" Value="0,0,16,16"/>
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+        <Style x:Key="ValueText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="26"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#111827"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#111827"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#0F172A" Padding="24,18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Endpoint Health Analyzer" Foreground="White" FontSize="25" FontWeight="Bold"/>
+                    <TextBlock Text="Local Windows endpoint diagnostics for Intune, update, driver, firmware, disk, and stability issues" Foreground="#CBD5E1" FontSize="13" Margin="0,4,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="StartScanButton" Content="Start Scan"/>
+                    <Button x:Name="ExportReportButton" Content="Export HTML report" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
+                    <Button x:Name="OpenReportButton" Content="Open report" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Background="White" BorderBrush="#E5E7EB" BorderThickness="0,0,0,1" Padding="24,16">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="StatusText" Text="Ready. Launch as administrator for the most complete scan." Foreground="#334155" FontSize="13" Margin="0,0,0,8"/>
+                <ProgressBar x:Name="ScanProgressBar" Grid.Row="1" Height="12" Minimum="0" Maximum="100" Value="0"/>
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="2" x:Name="MainTabs" Margin="18">
+            <TabItem Header="Overview">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="4">
+                        <UniformGrid Columns="4">
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Health score" Style="{StaticResource CardTitle}"/>
+                                    <TextBlock x:Name="HealthScoreText" Text="--" Style="{StaticResource ValueText}"/>
+                                    <TextBlock x:Name="HealthCategoryText" Text="No scan yet" Foreground="#64748B" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Device summary" Style="{StaticResource CardTitle}"/>
+                                    <TextBlock x:Name="DeviceSummaryText" Text="Waiting for scan" Style="{StaticResource ValueText}" FontSize="18"/>
+                                    <TextBlock x:Name="DeviceSubSummaryText" Text="" Foreground="#64748B" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Critical findings" Style="{StaticResource CardTitle}"/>
+                                    <TextBlock x:Name="CriticalCountText" Text="0" Style="{StaticResource ValueText}" Foreground="#B91C1C"/>
+                                    <TextBlock Text="Requires technician attention" Foreground="#64748B" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Warnings" Style="{StaticResource CardTitle}"/>
+                                    <TextBlock x:Name="WarningCountText" Text="0" Style="{StaticResource ValueText}" Foreground="#B45309"/>
+                                    <TextBlock Text="Review during remediation" Foreground="#64748B" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Critical findings" Style="{StaticResource CardTitle}"/>
+                                    <ListBox x:Name="CriticalFindingsList" MinHeight="180" BorderBrush="#FEE2E2"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Warnings" Style="{StaticResource CardTitle}"/>
+                                    <ListBox x:Name="WarningsList" MinHeight="180" BorderBrush="#FEF3C7"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Last scan result" Style="{StaticResource CardTitle}"/>
+                                <TextBox x:Name="LastScanResultText" MinHeight="150"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Device"><TextBox x:Name="DeviceDetailsText" Margin="8"/></TabItem>
+            <TabItem Header="Windows Update"><TextBox x:Name="WindowsUpdateText" Margin="8"/></TabItem>
+            <TabItem Header="Intune"><TextBox x:Name="IntuneText" Margin="8"/></TabItem>
+            <TabItem Header="Drivers &amp; Firmware"><TextBox x:Name="DriversFirmwareText" Margin="8"/></TabItem>
+            <TabItem Header="Event Logs"><TextBox x:Name="EventLogsText" Margin="8"/></TabItem>
+            <TabItem Header="Disk &amp; Hardware"><TextBox x:Name="DiskHardwareText" Margin="8"/></TabItem>
+            <TabItem Header="Comparison">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="ExportBaselineButton" Content="Export baseline" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
+                        <Button x:Name="LoadBaselineButton" Content="Load baseline" Style="{StaticResource SecondaryButton}"/>
+                        <Button x:Name="CompareBaselineButton" Content="Compare with baseline" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
+                    </StackPanel>
+                    <TextBox x:Name="ComparisonText" Grid.Row="1"/>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Export">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="18">
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Report paths" Style="{StaticResource CardTitle}"/>
+                                <TextBlock x:Name="ReportPathText" Text="HTML report: C:\ProgramData\EndpointHealthAnalyzer\Reports\EndpointHealthReport.html" Foreground="#334155" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="JsonPathText" Text="JSON report: C:\ProgramData\EndpointHealthAnalyzer\Data\EndpointHealthReport.json" Foreground="#334155" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <TextBlock x:Name="LogPathText" Text="Log: C:\ProgramData\EndpointHealthAnalyzer\Logs\EndpointHealthAnalyzer.log" Foreground="#334155" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="ExportReportButton2" Content="Export HTML report" IsEnabled="False"/>
+                            <Button x:Name="OpenReportButton2" Content="Open report" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
+                            <Button x:Name="OpenOutputFolderButton" Content="Open output folder" Style="{StaticResource SecondaryButton}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>
