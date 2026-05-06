@@ -3,6 +3,10 @@ Endpoint Health Analyzer
 PowerShell 5.1 + WPF local endpoint troubleshooting application.
 #>
 
+param(
+    [switch]$SilentScan
+)
+
 #region Modifiable Parameters
 $script:Config = [ordered]@{
     EventLookbackDays                 = 14
@@ -42,10 +46,13 @@ $script:ReportPath = Join-Path $script:ReportsPath 'EndpointHealthReport.html'
 $script:JsonReportPath = Join-Path $script:DataPath 'EndpointHealthReport.json'
 $script:LogPath = Join-Path $script:LogsPath 'EndpointHealthAnalyzer.log'
 $script:BaselinePath = Join-Path $script:DataPath 'Baseline.json'
+$script:ProgressPath = Join-Path $script:DataPath 'ScanProgress.json'
 $script:XamlPath = Join-Path $PSScriptRoot 'MainWindow.xaml'
 $script:TemplatePath = Join-Path $PSScriptRoot 'ReportTemplate.html'
 $script:CurrentReport = $null
 $script:LoadedBaseline = $null
+$script:ScanProcess = $null
+$script:ScanTimer = $null
 $script:Controls = @{}
 $script:FailedSections = New-Object System.Collections.ArrayList
 #endregion Static Variables
@@ -142,6 +149,17 @@ function Set-GuiStatus {
     Invoke-Gui {
         $script:Controls.StatusText.Text = $Status
         $script:Controls.ScanProgressBar.Value = $Progress
+    }
+    try {
+        $progressObject = [pscustomobject]@{
+            Status    = $Status
+            Progress  = $Progress
+            UpdatedAt = Get-Date
+            ProcessId = $PID
+        }
+        $progressObject | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:ProgressPath -Encoding UTF8
+    } catch {
+        Write-ToLog -Message "Unable to write progress file: $($_.Exception.Message)" -Level 'WARN'
     }
     Write-DebugToLog $Status
 }
@@ -1062,26 +1080,114 @@ function New-EndpointReport {
 }
 
 function Start-ScanWorkflow {
+    if ($script:ScanProcess -and -not $script:ScanProcess.HasExited) {
+        Set-GuiStatus 'A scan is already running.' 0
+        return
+    }
+
     Set-ButtonsForScan -IsScanning $true
     Write-ToLog -Message '============================================================'
-    Write-ToLog -Message 'Scan started'
+    Write-ToLog -Message 'Scan process launch requested'
     Write-ToLog -Message "Running user: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
     try {
-        $script:CurrentReport = New-EndpointReport
-        Set-GuiStatus 'Writing JSON report...' 96
-        Export-JsonReport -Report $script:CurrentReport | Out-Null
-        Set-GuiStatus 'Generating HTML report...' 98
-        New-HtmlReport -Report $script:CurrentReport | Out-Null
+        if (Test-Path -LiteralPath $script:ProgressPath) {
+            Remove-Item -LiteralPath $script:ProgressPath -Force -ErrorAction SilentlyContinue
+        }
+        Set-GuiStatus 'Starting background scan process...' 2
+
+        $arguments = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', "`"$PSCommandPath`"",
+            '-SilentScan'
+        )
+        $script:ScanProcess = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru
+        Write-ToLog -Message "Background scan process started. PID: $($script:ScanProcess.Id)"
+        Start-ScanProgressMonitor
+    } catch {
+        Write-ToLog -Message "Unable to start scan process: $($_.Exception.Message)" -Level 'ERROR'
+        [System.Windows.MessageBox]::Show("Unable to start scan process: $($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
+        Set-GuiStatus 'Scan could not be started. Review the log for details.' 0
+        Set-ButtonsForScan -IsScanning $false
+    }
+}
+
+function Start-ScanProgressMonitor {
+    if ($script:ScanTimer) {
+        $script:ScanTimer.Stop()
+    }
+
+    $script:ScanTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:ScanTimer.Interval = [TimeSpan]::FromMilliseconds(750)
+    $script:ScanTimer.Add_Tick({
+        try {
+            if (Test-Path -LiteralPath $script:ProgressPath) {
+                $progress = Get-Content -LiteralPath $script:ProgressPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+                if ($progress) {
+                    $script:Controls.StatusText.Text = $progress.Status
+                    $script:Controls.ScanProgressBar.Value = [int]$progress.Progress
+                }
+            }
+
+            if ($script:ScanProcess -and $script:ScanProcess.HasExited) {
+                $script:ScanTimer.Stop()
+                Complete-BackgroundScan
+            }
+        } catch {
+            Write-ToLog -Message "Progress monitor warning: $($_.Exception.Message)" -Level 'WARN'
+        }
+    })
+    $script:ScanTimer.Start()
+}
+
+function Complete-BackgroundScan {
+    try {
+        $exitCode = $script:ScanProcess.ExitCode
+        Write-ToLog -Message "Background scan process exited with code $exitCode"
+        if ($exitCode -ne 0) {
+            Set-GuiStatus "Scan process failed with exit code $exitCode. Review the log." 0
+            [System.Windows.MessageBox]::Show("The background scan process failed with exit code $exitCode. Review $script:LogPath for details.", $script:AppName, 'OK', 'Error') | Out-Null
+            return
+        }
+
+        if (-not (Test-Path -LiteralPath $script:JsonReportPath)) {
+            Set-GuiStatus 'Scan finished, but the JSON report was not found.' 0
+            [System.Windows.MessageBox]::Show("The scan finished, but $script:JsonReportPath was not found.", $script:AppName, 'OK', 'Error') | Out-Null
+            return
+        }
+
+        $script:CurrentReport = Get-Content -LiteralPath $script:JsonReportPath -Raw | ConvertFrom-Json
         Update-GuiWithReport -Report $script:CurrentReport
         Set-GuiStatus "Scan complete. Report saved to $script:ReportPath" 100
-        Write-ToLog -Message "Scan completed. Score: $($script:CurrentReport.HealthScore.Score) $($script:CurrentReport.HealthScore.Category)"
     } catch {
-        Write-ToLog -Message "Scan failed unexpectedly: $($_.Exception.Message)" -Level 'ERROR'
-        [System.Windows.MessageBox]::Show("The scan failed unexpectedly: $($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
-        Set-GuiStatus 'Scan failed. Review the log for details.' 0
+        Write-ToLog -Message "Unable to complete background scan: $($_.Exception.Message)" -Level 'ERROR'
+        [System.Windows.MessageBox]::Show("Unable to load scan results: $($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
+        Set-GuiStatus 'Scan completed, but result loading failed. Review the log.' 0
     } finally {
         Set-ButtonsForScan -IsScanning $false
         Write-ToLog -Message 'Scan ended'
+    }
+}
+
+function Invoke-SilentScan {
+    Write-ToLog -Message '============================================================'
+    Write-ToLog -Message 'Silent/background scan started'
+    Write-ToLog -Message "Running user: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+    try {
+        $report = New-EndpointReport
+        Set-GuiStatus 'Writing JSON report...' 96
+        Export-JsonReport -Report $report | Out-Null
+        Set-GuiStatus 'Generating HTML report...' 98
+        New-HtmlReport -Report $report | Out-Null
+        Set-GuiStatus "Scan complete. Report saved to $script:ReportPath" 100
+        Write-ToLog -Message "Silent/background scan completed. Score: $($report.HealthScore.Score) $($report.HealthScore.Category)"
+        exit 0
+    } catch {
+        Write-ToLog -Message "Silent/background scan failed unexpectedly: $($_.Exception.Message)" -Level 'ERROR'
+        Set-GuiStatus 'Scan failed. Review the log for details.' 0
+        exit 1
+    } finally {
+        Write-ToLog -Message 'Silent/background scan ended'
     }
 }
 
@@ -1112,6 +1218,11 @@ function Export-HtmlReportCopy {
 }
 
 Initialize-AppFolders
+if ($SilentScan) {
+    Invoke-SilentScan
+    return
+}
+
 Write-ToLog -Message 'Application launched'
 try {
     Import-Gui

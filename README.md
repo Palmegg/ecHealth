@@ -4,6 +4,8 @@ Endpoint Health Analyzer is a local Windows troubleshooting application for IT t
 
 The application uses PowerShell 5.1 with a WPF/XAML interface. It is not console-only. A scan produces a technician-friendly GUI summary, a structured JSON report, and a self-contained HTML report that opens directly from disk like a small local website.
 
+The GUI starts scan work in a separate hidden PowerShell process so the WPF window remains responsive while CIM, event log, Windows Update, Intune, driver, and disk checks run.
+
 ## Files
 
 - `EndpointHealthAnalyzer.ps1` - main application and scan engine
@@ -68,6 +70,7 @@ The application creates:
 
 - `C:\ProgramData\EndpointHealthAnalyzer\Reports\EndpointHealthReport.html`
 - `C:\ProgramData\EndpointHealthAnalyzer\Data\EndpointHealthReport.json`
+- `C:\ProgramData\EndpointHealthAnalyzer\Data\ScanProgress.json`
 - `C:\ProgramData\EndpointHealthAnalyzer\Logs\EndpointHealthAnalyzer.log`
 - `C:\ProgramData\EndpointHealthAnalyzer\Data\Baseline.json` when exporting a baseline
 
@@ -97,7 +100,15 @@ For technician-triggered downloads from a public repo, Intune or a remote sessio
 powershell.exe -ExecutionPolicy Bypass -File .\Launchpad.ps1
 ```
 
-For production Intune deployment, packaging all app files together is still preferred over downloading from GitHub at runtime. For silent collection scenarios, the current MVP is GUI-first. Future versions could add a `-SilentScan` switch for proactive remediation or collection-only deployment flows.
+For production Intune deployment, packaging all app files together is still preferred over downloading from GitHub at runtime. For collection-only scenarios, use the built-in `-SilentScan` mode.
+
+The main script now includes a background scan mode used by the GUI:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\EndpointHealthAnalyzer.ps1 -SilentScan
+```
+
+This mode writes the JSON and HTML reports without opening the WPF interface.
 
 ## What It Checks
 
