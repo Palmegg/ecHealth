@@ -38,7 +38,7 @@ $script:Config = [ordered]@{
 
 #region Static Variables
 $script:AppName = 'ecHealth'
-$script:AppVersion = '1.1.2'
+$script:AppVersion = '1.1.3'
 $script:RootPath = 'C:\ProgramData\EndpointHealthAnalyzer'
 $script:ReportsPath = Join-Path $script:RootPath 'Reports'
 $script:LogsPath = Join-Path $script:RootPath 'Logs'
@@ -803,21 +803,21 @@ function ConvertTo-HtmlTable {
         foreach ($item in @($InputObject)) {
             if ($null -eq $item) { continue }
             $props = $item.PSObject.Properties | Where-Object { $_.MemberType -match 'Property' }
-            $cells = foreach ($p in $props) { '<td>{0}</td>' -f (ConvertTo-HtmlEncoded (($p.Value | Out-String).Trim())) }
-            [void]$rows.Add('<tr>{0}</tr>' -f ($cells -join ''))
+            $cells = foreach ($p in $props) { '<td>' + (ConvertTo-HtmlEncoded (($p.Value | Out-String).Trim())) + '</td>' }
+            [void]$rows.Add('<tr>' + ($cells -join '') + '</tr>')
         }
         $first = @($InputObject | Select-Object -First 1)
         if ($first.Count -eq 0) { return '<p class="small">No rows found.</p>' }
-        $headers = $first[0].PSObject.Properties | Where-Object { $_.MemberType -match 'Property' } | ForEach-Object { '<th>{0}</th>' -f (ConvertTo-HtmlEncoded $_.Name) }
-        return '<table><thead><tr>{0}</tr></thead><tbody>{1}</tbody></table>' -f ($headers -join ''), ($rows -join '')
+        $headers = $first[0].PSObject.Properties | Where-Object { $_.MemberType -match 'Property' } | ForEach-Object { '<th>' + (ConvertTo-HtmlEncoded $_.Name) + '</th>' }
+        return '<table><thead><tr>' + ($headers -join '') + '</tr></thead><tbody>' + ($rows -join '') + '</tbody></table>'
     }
 
     foreach ($p in $InputObject.PSObject.Properties) {
         if ($p.Name -match '^PS') { continue }
         $value = if ($p.Value -is [System.Collections.IEnumerable] -and -not ($p.Value -is [string])) { ConvertTo-DisplayJson $p.Value } else { $p.Value }
-        [void]$rows.Add('<tr><th>{0}</th><td>{1}</td></tr>' -f (ConvertTo-HtmlEncoded $p.Name), (ConvertTo-HtmlEncoded (($value | Out-String).Trim())))
+        [void]$rows.Add('<tr><th>' + (ConvertTo-HtmlEncoded $p.Name) + '</th><td>' + (ConvertTo-HtmlEncoded (($value | Out-String).Trim())) + '</td></tr>')
     }
-    '<table><tbody>{0}</tbody></table>' -f ($rows -join '')
+    '<table><tbody>' + ($rows -join '') + '</tbody></table>'
 }
 
 function Convert-FindingsToHtml {
@@ -825,14 +825,14 @@ function Convert-FindingsToHtml {
     if (@($Findings).Count -eq 0) { return '<p class="small">None detected.</p>' }
     $class = if ($Critical) { 'finding criticalFinding' } else { 'finding' }
     (@($Findings) | ForEach-Object {
-        '<article class="{0}"><h3>{1}</h3><p><strong>{2}</strong> | {3}</p><p>{4}</p><div class="evidence">{5}</div><p><strong>Recommended action:</strong> {6}</p></article>' -f
-            $class,
-            (ConvertTo-HtmlEncoded $_.Title),
-            (ConvertTo-HtmlEncoded $_.Category),
-            (ConvertTo-HtmlEncoded $_.Severity),
-            (ConvertTo-HtmlEncoded $_.Description),
-            (ConvertTo-HtmlEncoded $_.Evidence),
-            (ConvertTo-HtmlEncoded $_.RecommendedAction)
+        '<article class="' + $class + '"><h3>' +
+            (ConvertTo-HtmlEncoded $_.Title) +
+            '</h3><p><strong>' + (ConvertTo-HtmlEncoded $_.Category) +
+            '</strong> | ' + (ConvertTo-HtmlEncoded $_.Severity) +
+            '</p><p>' + (ConvertTo-HtmlEncoded $_.Description) +
+            '</p><div class="evidence">' + (ConvertTo-HtmlEncoded $_.Evidence) +
+            '</div><p><strong>Recommended action:</strong> ' + (ConvertTo-HtmlEncoded $_.RecommendedAction) +
+            '</p></article>'
     }) -join "`n"
 }
 
@@ -850,7 +850,12 @@ function Convert-EventsToHtml {
             continue
         }
         $rows = @($channel.Events | Select-Object TimeCreated,Id,LevelDisplay,ProviderName,Message | ForEach-Object {
-            '<tr class="eventRow"><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td></tr>' -f (ConvertTo-HtmlEncoded $_.TimeCreated), $_.Id, (ConvertTo-HtmlEncoded $_.LevelDisplay), (ConvertTo-HtmlEncoded $_.ProviderName), (ConvertTo-HtmlEncoded $_.Message)
+            '<tr class="eventRow"><td>' + (ConvertTo-HtmlEncoded $_.TimeCreated) +
+                '</td><td>' + (ConvertTo-HtmlEncoded $_.Id) +
+                '</td><td>' + (ConvertTo-HtmlEncoded $_.LevelDisplay) +
+                '</td><td>' + (ConvertTo-HtmlEncoded $_.ProviderName) +
+                '</td><td>' + (ConvertTo-HtmlEncoded $_.Message) +
+                '</td></tr>'
         })
         [void]$html.Add('<table><thead><tr><th>Time</th><th>ID</th><th>Level</th><th>Provider</th><th>Message</th></tr></thead><tbody>')
         [void]$html.Add(($rows -join "`n"))
@@ -881,10 +886,28 @@ function New-HtmlReport {
 <p><strong>$($Report.Device.ComputerName)</strong> scored <strong>$($Report.HealthScore.Score)</strong> and is categorized as <strong>$($Report.HealthScore.Category)</strong>.</p>
 <p>The scan found <strong>$(@($Report.CriticalFindings).Count)</strong> critical findings and <strong>$(@($Report.Warnings).Count)</strong> warnings across update, Intune, driver, firmware, event log, disk, and hardware checks.</p>
 "@
-        $windowsUpdateHtml = '<details open><summary>Windows Update summary</summary>{0}</details><details><summary>Pending updates</summary>{1}</details><details><summary>Policy/source registry values</summary>{2}</details><details><summary>Failed update events</summary>{3}</details>' -f (ConvertTo-HtmlTable ($Report.WindowsUpdate | Select-Object LastWindowsUpdateScan,LastSuccessfulUpdateInstallation,PendingUpdateCount,FailedWindowsUpdateEventCount,MissingRecentUpdateActivity)), (ConvertTo-HtmlTable $Report.WindowsUpdate.PendingUpdates), (ConvertTo-HtmlTable $Report.WindowsUpdate.WindowsUpdatePolicySourceRegistry), (ConvertTo-HtmlTable $Report.WindowsUpdate.FailedWindowsUpdateEvents)
-        $intuneHtml = '<details open><summary>Intune summary</summary>{0}</details><details><summary>IME log files</summary>{1}</details><details><summary>Expected IME logs</summary>{2}</details><details><summary>DeviceManagement events</summary>{3}</details>' -f (ConvertTo-HtmlTable ($Report.Intune | Select-Object IMEServiceStatus,IMEServiceStartType,IMELogFolderExists,LatestIMELogModified,AutopilotEventChannelPresent)), (ConvertTo-HtmlTable $Report.Intune.RecentIMELogFiles), (ConvertTo-HtmlTable $Report.Intune.ExpectedIMELogs), (ConvertTo-HtmlTable $Report.Intune.DeviceManagementEvents.Events)
-        $driversHtml = '<details open><summary>Firmware</summary>{0}</details><details><summary>Problem PnP devices</summary>{1}</details><details><summary>Display adapters</summary>{2}</details><details><summary>Network adapters</summary>{3}</details><details><summary>Storage controllers</summary>{4}</details><details><summary>System/chipset devices</summary>{5}</details>' -f (ConvertTo-HtmlTable ($Report.DriversFirmware | Select-Object BIOSVersion,BIOSReleaseDate,BIOSAgeDays,BIOSAgeWarning,ProblemPnpDeviceCount)), (ConvertTo-HtmlTable $Report.DriversFirmware.ProblemPnpDevices), (ConvertTo-HtmlTable $Report.DriversFirmware.DisplayAdapters), (ConvertTo-HtmlTable $Report.DriversFirmware.NetworkAdapters), (ConvertTo-HtmlTable $Report.DriversFirmware.StorageControllers), (ConvertTo-HtmlTable $Report.DriversFirmware.SystemChipsetDevices)
-        $diskHtml = '<details open><summary>Disk health summary</summary>{0}</details><details><summary>Physical disk health</summary>{1}</details><details><summary>SMART/storage reliability</summary>{2}</details><details><summary>Battery</summary>{3}</details>' -f (ConvertTo-HtmlTable ($Report.DiskHardware | Select-Object SystemDriveFreeGB,SystemDriveFreePercent,LowDiskSpace,DiskRelatedEventCount,NTFSEventCount,WHEAEventCount,BatteryAvailable)), (ConvertTo-HtmlTable $Report.DiskHardware.PhysicalDiskHealth), (ConvertTo-HtmlTable $Report.DiskHardware.StorageReliability), (ConvertTo-HtmlTable $Report.DiskHardware.Battery)
+        $windowsUpdateHtml =
+            '<details open><summary>Windows Update summary</summary>' + (ConvertTo-HtmlTable ($Report.WindowsUpdate | Select-Object LastWindowsUpdateScan,LastSuccessfulUpdateInstallation,PendingUpdateCount,FailedWindowsUpdateEventCount,MissingRecentUpdateActivity)) + '</details>' +
+            '<details><summary>Pending updates</summary>' + (ConvertTo-HtmlTable $Report.WindowsUpdate.PendingUpdates) + '</details>' +
+            '<details><summary>Policy/source registry values</summary>' + (ConvertTo-HtmlTable $Report.WindowsUpdate.WindowsUpdatePolicySourceRegistry) + '</details>' +
+            '<details><summary>Failed update events</summary>' + (ConvertTo-HtmlTable $Report.WindowsUpdate.FailedWindowsUpdateEvents) + '</details>'
+        $intuneHtml =
+            '<details open><summary>Intune summary</summary>' + (ConvertTo-HtmlTable ($Report.Intune | Select-Object IMEServiceStatus,IMEServiceStartType,IMELogFolderExists,LatestIMELogModified,AutopilotEventChannelPresent)) + '</details>' +
+            '<details><summary>IME log files</summary>' + (ConvertTo-HtmlTable $Report.Intune.RecentIMELogFiles) + '</details>' +
+            '<details><summary>Expected IME logs</summary>' + (ConvertTo-HtmlTable $Report.Intune.ExpectedIMELogs) + '</details>' +
+            '<details><summary>DeviceManagement events</summary>' + (ConvertTo-HtmlTable $Report.Intune.DeviceManagementEvents.Events) + '</details>'
+        $driversHtml =
+            '<details open><summary>Firmware</summary>' + (ConvertTo-HtmlTable ($Report.DriversFirmware | Select-Object BIOSVersion,BIOSReleaseDate,BIOSAgeDays,BIOSAgeWarning,ProblemPnpDeviceCount)) + '</details>' +
+            '<details><summary>Problem PnP devices</summary>' + (ConvertTo-HtmlTable $Report.DriversFirmware.ProblemPnpDevices) + '</details>' +
+            '<details><summary>Display adapters</summary>' + (ConvertTo-HtmlTable $Report.DriversFirmware.DisplayAdapters) + '</details>' +
+            '<details><summary>Network adapters</summary>' + (ConvertTo-HtmlTable $Report.DriversFirmware.NetworkAdapters) + '</details>' +
+            '<details><summary>Storage controllers</summary>' + (ConvertTo-HtmlTable $Report.DriversFirmware.StorageControllers) + '</details>' +
+            '<details><summary>System/chipset devices</summary>' + (ConvertTo-HtmlTable $Report.DriversFirmware.SystemChipsetDevices) + '</details>'
+        $diskHtml =
+            '<details open><summary>Disk health summary</summary>' + (ConvertTo-HtmlTable ($Report.DiskHardware | Select-Object SystemDriveFreeGB,SystemDriveFreePercent,LowDiskSpace,DiskRelatedEventCount,NTFSEventCount,WHEAEventCount,BatteryAvailable)) + '</details>' +
+            '<details><summary>Physical disk health</summary>' + (ConvertTo-HtmlTable $Report.DiskHardware.PhysicalDiskHealth) + '</details>' +
+            '<details><summary>SMART/storage reliability</summary>' + (ConvertTo-HtmlTable $Report.DiskHardware.StorageReliability) + '</details>' +
+            '<details><summary>Battery</summary>' + (ConvertTo-HtmlTable $Report.DiskHardware.Battery) + '</details>'
         $comparisonHtml = if ($Report.Comparison -and $Report.Comparison.Results) { ConvertTo-HtmlTable $Report.Comparison.Results } else { '<p class="small">No baseline comparison has been run.</p>' }
 
         $replacements = @{
@@ -1228,7 +1251,10 @@ function Invoke-SilentScan {
         Set-GuiStatus 'Writing JSON report...' 96
         Export-JsonReport -Report $report | Out-Null
         Set-GuiStatus 'Generating HTML report...' 98
-        New-HtmlReport -Report $report | Out-Null
+        $htmlPath = New-HtmlReport -Report $report
+        if (-not $htmlPath -or -not (Test-Path -LiteralPath $script:ReportPath)) {
+            throw "HTML report generation failed. Expected report was not created at $script:ReportPath"
+        }
         Set-GuiStatus "Scan complete. Report saved to $script:ReportPath" 100
         Write-ToLog -Message "Silent/background scan completed. Score: $($report.HealthScore.Score) $($report.HealthScore.Category)"
         exit 0

@@ -84,7 +84,7 @@
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="ecHealth" Foreground="White" FontSize="25" FontWeight="Bold"/>
-                        <TextBlock x:Name="VersionText" Text="v1.1.2" Foreground="#BFDBFE" FontSize="13" FontWeight="SemiBold" Margin="12,8,0,0"/>
+                        <TextBlock x:Name="VersionText" Text="v1.1.3" Foreground="#BFDBFE" FontSize="13" FontWeight="SemiBold" Margin="12,8,0,0"/>
                     </StackPanel>
                     <TextBlock Text="Local Windows endpoint diagnostics for Intune, update, driver, firmware, disk, and stability issues" Foreground="#CBD5E1" FontSize="13" Margin="0,4,0,0"/>
                 </StackPanel>
