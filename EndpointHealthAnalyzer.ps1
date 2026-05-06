@@ -205,8 +205,8 @@ Failed sections: $(@($Report.Metadata.FailedSections).Count)
 function Invoke-SafeSection {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
-        [Parameter(Mandatory = $true)]$Fallback
+        $DefaultValue,
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock
     )
     Write-ToLog -Message "Starting section: $Name"
     try {
@@ -215,7 +215,7 @@ function Invoke-SafeSection {
         return $result
     } catch {
         Add-FailedSection -Section $Name -ErrorMessage $_.Exception.Message
-        return $Fallback
+        return $DefaultValue
     }
 }
 
@@ -312,7 +312,7 @@ function Get-MdmEnrollmentIndicators {
 }
 
 function Get-DeviceIdentity {
-    Invoke-SafeSection -Name 'Device identity' -Fallback ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
+    Invoke-SafeSection -Name 'Device identity' -DefaultValue ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
         $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
         $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
         $dsreg = Get-DsRegStatus
@@ -351,7 +351,7 @@ function Get-DeviceIdentity {
 }
 
 function Get-EndpointHardware {
-    Invoke-SafeSection -Name 'Hardware' -Fallback ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
+    Invoke-SafeSection -Name 'Hardware' -DefaultValue ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
         $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
         $bios = Get-CimInstance -ClassName Win32_BIOS -ErrorAction Stop
         $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -455,7 +455,7 @@ function Get-RecentEvents {
 }
 
 function Get-WindowsUpdateData {
-    Invoke-SafeSection -Name 'Windows Update' -Fallback ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
+    Invoke-SafeSection -Name 'Windows Update' -DefaultValue ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
         $wuEvents = Get-RecentEvents -LogName 'Microsoft-Windows-WindowsUpdateClient/Operational' -Levels @(1,2,3,4) -MaxEvents 120
         $failedEvents = @($wuEvents.Events | Where-Object { $_.LevelDisplay -in @('Error','Critical') -or $_.Id -in @(20,25,31,34,35) })
         $latestActivity = @($wuEvents.Events | Sort-Object TimeCreated -Descending | Select-Object -First 1)
@@ -505,7 +505,7 @@ function Get-WindowsUpdateData {
 }
 
 function Get-IntuneData {
-    Invoke-SafeSection -Name 'Intune' -Fallback ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
+    Invoke-SafeSection -Name 'Intune' -DefaultValue ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
         $service = $null
         try { $service = Get-Service -Name 'IntuneManagementExtension' -ErrorAction SilentlyContinue } catch { }
         $logFolder = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs'
@@ -543,7 +543,7 @@ function Get-IntuneData {
 
 function Get-DriversFirmwareData {
     param([pscustomobject]$Hardware)
-    Invoke-SafeSection -Name 'Drivers and firmware' -Fallback ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
+    Invoke-SafeSection -Name 'Drivers and firmware' -DefaultValue ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
         $problemDevices = @()
         try {
             if (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue) {
@@ -575,7 +575,7 @@ function Get-DriversFirmwareData {
 }
 
 function Get-EventLogAnalysis {
-    Invoke-SafeSection -Name 'Event logs' -Fallback ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
+    Invoke-SafeSection -Name 'Event logs' -DefaultValue ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
         $channels = @(
             'System',
             'Application',
@@ -609,7 +609,7 @@ function Get-EventLogAnalysis {
 
 function Get-DiskHardwareHealth {
     param([pscustomobject]$Hardware, [pscustomobject]$EventLogs)
-    Invoke-SafeSection -Name 'Disk and hardware health' -Fallback ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
+    Invoke-SafeSection -Name 'Disk and hardware health' -DefaultValue ([pscustomobject]@{ SectionFailed = $true }) -ScriptBlock {
         $reliability = @()
         try {
             $reliability = @(Get-CimInstance -Namespace root\wmi -ClassName MSStorageDriver_FailurePredictStatus -ErrorAction SilentlyContinue | Select-Object InstanceName,PredictFailure,Reason)
@@ -843,7 +843,7 @@ function Get-CategoryClass {
 
 function New-HtmlReport {
     param([pscustomobject]$Report)
-    Invoke-SafeSection -Name 'HTML report' -Fallback $null -ScriptBlock {
+    Invoke-SafeSection -Name 'HTML report' -DefaultValue $null -ScriptBlock {
         if (-not (Test-Path -LiteralPath $script:TemplatePath)) {
             throw "ReportTemplate.html was not found at $script:TemplatePath"
         }
@@ -894,7 +894,7 @@ function New-HtmlReport {
 #region JSON Export Functions
 function Export-JsonReport {
     param([pscustomobject]$Report)
-    Invoke-SafeSection -Name 'JSON report' -Fallback $null -ScriptBlock {
+    Invoke-SafeSection -Name 'JSON report' -DefaultValue $null -ScriptBlock {
         $Report | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $script:JsonReportPath -Encoding UTF8
         return $script:JsonReportPath
     }
