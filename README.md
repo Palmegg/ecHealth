@@ -1,6 +1,6 @@
-# Endpoint Health Analyzer
+# ecHealth
 
-Endpoint Health Analyzer is a local Windows troubleshooting application for IT technicians working with Intune-managed endpoints, Windows Update failures, driver and firmware problems, disk or hardware instability, freezing PCs, and general device health issues.
+ecHealth is a local Windows troubleshooting application for IT technicians working with Intune-managed endpoints, Windows Update failures, driver and firmware problems, disk or hardware instability, freezing PCs, and general device health issues.
 
 The application uses PowerShell 5.1 with a WPF/XAML interface. It is not console-only. A scan produces a technician-friendly GUI summary, a structured JSON report, and a self-contained HTML report that opens directly from disk like a small local website.
 
@@ -109,6 +109,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\EndpointHealthAnalyzer
 ```
 
 This mode writes the JSON and HTML reports without opening the WPF interface.
+
+## Logs
+
+Use **Open logs** in the app to open the main ecHealth log:
+
+```text
+C:\ProgramData\EndpointHealthAnalyzer\Logs\EndpointHealthAnalyzer.log
+```
+
+Launchpad activity is logged here:
+
+```text
+C:\ProgramData\EndpointHealthAnalyzer\Logs\Launchpad.log
+```
 
 ## What It Checks
 

@@ -1,5 +1,5 @@
 <# 
-Endpoint Health Analyzer
+ecHealth
 PowerShell 5.1 + WPF local endpoint troubleshooting application.
 #>
 
@@ -37,8 +37,8 @@ $script:Config = [ordered]@{
 #endregion Modifiable Parameters
 
 #region Static Variables
-$script:AppName = 'Endpoint Health Analyzer'
-$script:AppVersion = '1.1.0'
+$script:AppName = 'ecHealth'
+$script:AppVersion = '1.1.1'
 $script:RootPath = 'C:\ProgramData\EndpointHealthAnalyzer'
 $script:ReportsPath = Join-Path $script:RootPath 'Reports'
 $script:LogsPath = Join-Path $script:RootPath 'Logs'
@@ -111,7 +111,7 @@ function Import-Gui {
     $script:Window = [Windows.Markup.XamlReader]::Load($reader)
 
     $names = @(
-        'StartScanButton','ExportReportButton','OpenReportButton','StatusText','ScanProgressBar',
+        'StartScanButton','ExportReportButton','OpenReportButton','OpenLogsButton','StatusText','ScanProgressBar',
         'VersionText',
         'HealthScoreText','HealthCategoryText','DeviceSummaryText','DeviceSubSummaryText',
         'CriticalCountText','WarningCountText','CriticalFindingsList','WarningsList',
@@ -119,7 +119,7 @@ function Import-Gui {
         'DriversFirmwareText','EventLogsText','DiskHardwareText','ComparisonText',
         'ExportBaselineButton','LoadBaselineButton','CompareBaselineButton',
         'ReportPathText','JsonPathText','LogPathText','ExportReportButton2',
-        'OpenReportButton2','OpenOutputFolderButton'
+        'OpenReportButton2','OpenLogsButton2','OpenOutputFolderButton'
     )
 
     foreach ($name in $names) {
@@ -137,6 +137,8 @@ function Import-Gui {
     $script:Controls.ExportReportButton2.Add_Click({ Export-HtmlReportCopy })
     $script:Controls.OpenReportButton.Add_Click({ Open-Report })
     $script:Controls.OpenReportButton2.Add_Click({ Open-Report })
+    $script:Controls.OpenLogsButton.Add_Click({ Open-Logs })
+    $script:Controls.OpenLogsButton2.Add_Click({ Open-Logs })
     $script:Controls.ExportBaselineButton.Add_Click({ Export-Baseline })
     $script:Controls.LoadBaselineButton.Add_Click({ Load-Baseline })
     $script:Controls.CompareBaselineButton.Add_Click({ Compare-BaselineFromGui })
@@ -1177,6 +1179,46 @@ function Complete-BackgroundScan {
     }
 }
 
+function Open-FileWithShell {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "File was not found: $Path"
+    }
+
+    try {
+        Start-Process -FilePath $Path -ErrorAction Stop
+    } catch {
+        Write-ToLog -Message "Direct shell open failed for $Path. Trying explorer.exe. Error: $($_.Exception.Message)" -Level 'WARN'
+        Start-Process -FilePath 'explorer.exe' -ArgumentList "`"$Path`"" -ErrorAction Stop
+    }
+}
+
+function Ensure-HtmlReportExists {
+    if (Test-Path -LiteralPath $script:ReportPath) {
+        return $true
+    }
+
+    Write-ToLog -Message "HTML report missing at $script:ReportPath" -Level 'WARN'
+    if (-not $script:CurrentReport -and (Test-Path -LiteralPath $script:JsonReportPath)) {
+        try {
+            $script:CurrentReport = Get-Content -LiteralPath $script:JsonReportPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            Write-ToLog -Message "Unable to load JSON report while regenerating HTML: $($_.Exception.Message)" -Level 'ERROR'
+        }
+    }
+
+    if ($script:CurrentReport) {
+        try {
+            Write-ToLog -Message 'Regenerating missing HTML report from current JSON data'
+            New-HtmlReport -Report $script:CurrentReport | Out-Null
+        } catch {
+            Write-ToLog -Message "Unable to regenerate HTML report: $($_.Exception.Message)" -Level 'ERROR'
+        }
+    }
+
+    return (Test-Path -LiteralPath $script:ReportPath)
+}
+
 function Invoke-SilentScan {
     Write-ToLog -Message '============================================================'
     Write-ToLog -Message 'Silent/background scan started'
@@ -1200,28 +1242,56 @@ function Invoke-SilentScan {
 }
 
 function Open-Report {
-    if (Test-Path -LiteralPath $script:ReportPath) {
-        Start-Process -FilePath $script:ReportPath
-    } else {
-        [System.Windows.MessageBox]::Show('No HTML report has been generated yet.', $script:AppName, 'OK', 'Information') | Out-Null
+    Write-ToLog -Message 'Open report button clicked'
+    try {
+        if (Ensure-HtmlReportExists) {
+            Open-FileWithShell -Path $script:ReportPath
+            Write-ToLog -Message "Opened HTML report: $script:ReportPath"
+        } else {
+            [System.Windows.MessageBox]::Show("No HTML report was found at:`n$script:ReportPath`n`nRun a scan first, or review the log for report generation errors.", $script:AppName, 'OK', 'Information') | Out-Null
+            Write-ToLog -Message "Open report failed because report is missing: $script:ReportPath" -Level 'WARN'
+        }
+    } catch {
+        Write-ToLog -Message "Open report failed: $($_.Exception.Message)" -Level 'ERROR'
+        [System.Windows.MessageBox]::Show("Could not open the report:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
     }
 }
 
 function Export-HtmlReportCopy {
-    if (-not (Test-Path -LiteralPath $script:ReportPath)) { return }
+    Write-ToLog -Message 'Export HTML report button clicked'
+    if (-not (Ensure-HtmlReportExists)) {
+        [System.Windows.MessageBox]::Show("No HTML report was found at:`n$script:ReportPath`n`nRun a scan first, or review the log for report generation errors.", $script:AppName, 'OK', 'Information') | Out-Null
+        Write-ToLog -Message "Export report failed because report is missing: $script:ReportPath" -Level 'WARN'
+        return
+    }
     try {
         $dialog = New-Object Microsoft.Win32.SaveFileDialog
         $dialog.InitialDirectory = $script:ReportsPath
         $dialog.Filter = 'HTML files (*.html)|*.html|All files (*.*)|*.*'
-        $dialog.FileName = "EndpointHealthReport-$env:COMPUTERNAME.html"
+        $dialog.FileName = "ecHealthReport-$env:COMPUTERNAME.html"
         if ($dialog.ShowDialog()) {
             Copy-Item -LiteralPath $script:ReportPath -Destination $dialog.FileName -Force
             Set-GuiStatus -Status "HTML report exported to $($dialog.FileName)" -Progress 100
             Write-ToLog -Message "HTML report exported to $($dialog.FileName)"
+        } else {
+            Write-ToLog -Message 'HTML report export dialog was cancelled'
         }
     } catch {
         [System.Windows.MessageBox]::Show("Failed to export report: $($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
         Write-ToLog -Message "Failed to export report: $($_.Exception.Message)" -Level 'ERROR'
+    }
+}
+
+function Open-Logs {
+    Write-ToLog -Message 'Open logs button clicked'
+    try {
+        if (-not (Test-Path -LiteralPath $script:LogPath)) {
+            New-Item -Path $script:LogPath -ItemType File -Force | Out-Null
+        }
+        Open-FileWithShell -Path $script:LogPath
+    } catch {
+        Write-ToLog -Message "Open logs failed: $($_.Exception.Message)" -Level 'ERROR'
+        [System.Windows.MessageBox]::Show("Could not open the ecHealth log:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
     }
 }
 

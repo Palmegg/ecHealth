@@ -1,5 +1,5 @@
 <#
-Endpoint Health Analyzer Launchpad
+ecHealth Launchpad
 Downloads the application files from GitHub and starts the WPF scanner.
 #>
 
@@ -103,7 +103,7 @@ try {
         throw "Downloaded application script was not found at $appScript"
     }
 
-    Write-LaunchpadLog -Message "Starting Endpoint Health Analyzer from $appScript"
+    Write-LaunchpadLog -Message "Starting ecHealth from $appScript"
     Start-Process -FilePath 'powershell.exe' -ArgumentList @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
@@ -113,7 +113,7 @@ try {
 } catch {
     Write-LaunchpadLog -Message $_.Exception.Message -Level 'ERROR'
     Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
-    [System.Windows.MessageBox]::Show($_.Exception.Message, 'Endpoint Health Analyzer Launchpad', 'OK', 'Error') | Out-Null
+    [System.Windows.MessageBox]::Show($_.Exception.Message, 'ecHealth Launchpad', 'OK', 'Error') | Out-Null
     throw
 }
 #endregion Main Execution
