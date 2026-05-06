@@ -38,6 +38,7 @@ $script:Config = [ordered]@{
 
 #region Static Variables
 $script:AppName = 'Endpoint Health Analyzer'
+$script:AppVersion = '1.1.0'
 $script:RootPath = 'C:\ProgramData\EndpointHealthAnalyzer'
 $script:ReportsPath = Join-Path $script:RootPath 'Reports'
 $script:LogsPath = Join-Path $script:RootPath 'Logs'
@@ -111,6 +112,7 @@ function Import-Gui {
 
     $names = @(
         'StartScanButton','ExportReportButton','OpenReportButton','StatusText','ScanProgressBar',
+        'VersionText',
         'HealthScoreText','HealthCategoryText','DeviceSummaryText','DeviceSubSummaryText',
         'CriticalCountText','WarningCountText','CriticalFindingsList','WarningsList',
         'LastScanResultText','DeviceDetailsText','WindowsUpdateText','IntuneText',
@@ -122,6 +124,12 @@ function Import-Gui {
 
     foreach ($name in $names) {
         $script:Controls[$name] = $script:Window.FindName($name)
+    }
+
+    $script:Window.Title = "$script:AppName v$script:AppVersion"
+    $script:Window.WindowStartupLocation = 'CenterScreen'
+    if ($script:Controls.VersionText) {
+        $script:Controls.VersionText.Text = "v$script:AppVersion"
     }
 
     $script:Controls.StartScanButton.Add_Click({ Start-ScanWorkflow })
@@ -1030,7 +1038,7 @@ function New-EndpointReport {
     $script:FailedSections = New-Object System.Collections.ArrayList
     $metadata = [pscustomobject]@{
         ToolName       = $script:AppName
-        ToolVersion    = '1.0.0'
+        ToolVersion    = $script:AppVersion
         GeneratedAt    = Get-Date
         RunningUser    = [Security.Principal.WindowsIdentity]::GetCurrent().Name
         IsAdministrator = Test-IsAdmin
@@ -1223,7 +1231,7 @@ if ($SilentScan) {
     return
 }
 
-Write-ToLog -Message 'Application launched'
+Write-ToLog -Message "Application launched. Version: $script:AppVersion"
 try {
     Import-Gui
     if (-not (Test-IsAdmin)) {

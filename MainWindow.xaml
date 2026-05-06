@@ -82,7 +82,10 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="Endpoint Health Analyzer" Foreground="White" FontSize="25" FontWeight="Bold"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Endpoint Health Analyzer" Foreground="White" FontSize="25" FontWeight="Bold"/>
+                        <TextBlock x:Name="VersionText" Text="v1.0.0" Foreground="#BFDBFE" FontSize="13" FontWeight="SemiBold" Margin="12,8,0,0"/>
+                    </StackPanel>
                     <TextBlock Text="Local Windows endpoint diagnostics for Intune, update, driver, firmware, disk, and stability issues" Foreground="#CBD5E1" FontSize="13" Margin="0,4,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
