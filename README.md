@@ -47,7 +47,7 @@ Then it starts `EndpointHealthAnalyzer.ps1`.
 Example one-liner:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; irm https://raw.githubusercontent.com/Palmegg/ecHealth/main/Launchpad.ps1 | iex
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; irm "https://raw.githubusercontent.com/Palmegg/ecHealth/main/Launchpad.ps1?cacheBust=$(Get-Date -Format yyyyMMddHHmmss)" | iex
 ```
 
 The launchpad writes its own log to:

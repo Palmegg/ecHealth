@@ -38,7 +38,7 @@ $script:Config = [ordered]@{
 
 #region Static Variables
 $script:AppName = 'ecHealth'
-$script:AppVersion = '1.1.1'
+$script:AppVersion = '1.1.2'
 $script:RootPath = 'C:\ProgramData\EndpointHealthAnalyzer'
 $script:ReportsPath = Join-Path $script:RootPath 'Reports'
 $script:LogsPath = Join-Path $script:RootPath 'Logs'

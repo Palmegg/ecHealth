@@ -9,6 +9,7 @@ $RepositoryName = 'ecHealth'
 $RepositoryBranch = 'main'
 $InstallPath = 'C:\ProgramData\EndpointHealthAnalyzer\App'
 $StartAsAdministrator = $true
+$CacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $RequiredFiles = @(
     'EndpointHealthAnalyzer.ps1',
     'MainWindow.xaml',
@@ -63,11 +64,20 @@ function Invoke-FileDownload {
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][string]$Destination
     )
-    Write-LaunchpadLog -Message "Downloading $Url to $Destination"
+    $downloadUrl = if ($Url -match '\?') { "$Url&cacheBust=$CacheBust" } else { "$Url`?cacheBust=$CacheBust" }
+    Write-LaunchpadLog -Message "Downloading $downloadUrl to $Destination"
     try {
-        Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -ErrorAction Stop
+        if (Test-Path -LiteralPath $Destination) {
+            Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+        }
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $Destination -UseBasicParsing -Headers @{
+            'Cache-Control' = 'no-cache'
+            'Pragma'        = 'no-cache'
+        } -ErrorAction Stop
+        $downloadedItem = Get-Item -LiteralPath $Destination -ErrorAction Stop
+        Write-LaunchpadLog -Message "Downloaded $($downloadedItem.Name), $($downloadedItem.Length) bytes, LastWriteTime $($downloadedItem.LastWriteTime)"
     } catch {
-        throw "Failed to download $Url. $($_.Exception.Message)"
+        throw "Failed to download $downloadUrl. $($_.Exception.Message)"
     }
 }
 #endregion Helper Functions
